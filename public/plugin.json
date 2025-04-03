@@ -1,0 +1,15 @@
+{
+  "main": "index.html",
+  "preload": "preload/services.js",
+  "logo": "logo.png",
+  "development": {
+    "main": "http://localhost:5173"
+  },
+  "features": [
+    {
+      "code": "http-request",
+      "explain": "HTTP请求工具",
+      "cmds": ["http", "https", "请求", "request", "接口测试", "接口调试"]
+    }
+  ]
+}
