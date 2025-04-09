@@ -21,6 +21,14 @@
           >
             批量删除
           </el-button>
+          <el-button 
+            type="info" 
+            size="small" 
+            @click="showSettings"
+            class="settings-button"
+          >
+            <el-icon><Setting /></el-icon>
+          </el-button>
         </div>
       </div>
       <el-menu
@@ -70,27 +78,54 @@
       <div class="request-section">
         <div class="url-bar">
           <div class="url-input-group">
-            
-            <el-input 
-              v-model="requestForm.url" 
-              placeholder="请输入请求地址"
-              @change="saveCurrentRequest"
-              class="url-input"
+            <el-select
+              v-model="currentEnvId"
+              placeholder="选择环境"
+              class="env-select"
+              @change="handleEnvironmentChange"
             >
-              <template #prepend>
-                <el-select 
-                  v-model="requestForm.method" 
-                  @change="saveCurrentRequest" 
-                  class="method-select"
-                >
-                  <el-option label="GET" value="GET" />
-                  <el-option label="POST" value="POST" />
-                  <el-option label="PUT" value="PUT" />
-                  <el-option label="DELETE" value="DELETE" />
-                </el-select>
-              </template>
-            </el-input>
-            
+              <el-option
+                v-for="env in environments"
+                :key="env.id"
+                :label="env.name"
+                :value="env.id"
+              />
+            </el-select>
+            <div class="url-input-wrapper">
+              <el-input
+                v-model="requestForm.url"
+                placeholder="请输入请求URL"
+                class="url-input"
+                :autocomplete="'off'"
+                @change="saveCurrentRequest"
+                @input="handleUrlInput"
+              >
+                <template #prepend>
+                  <el-select
+                    v-model="requestForm.method"
+                    @change="saveCurrentRequest"
+                    class="method-select"
+                  >
+                    <el-option label="GET" value="GET" />
+                    <el-option label="POST" value="POST" />
+                    <el-option label="PUT" value="PUT" />
+                    <el-option label="DELETE" value="DELETE" />
+                    <el-option label="PATCH" value="PATCH" />
+                  </el-select>
+                </template>
+                <template #input>
+                  <span class="url-input-content">
+                    <template v-if="requestForm.url">
+                      <template v-for="(part, index) in parseUrlWithVariables(requestForm.url)" :key="index">
+                        <span v-if="part.type === 'variable'" class="variable-highlight">{{ part.text }}</span>
+                        <span v-else>{{ part.text }}</span>
+                      </template>
+                    </template>
+                    <template v-else>&nbsp;</template>
+                  </span>
+                </template>
+              </el-input>
+            </div>
             <el-button 
               type="primary" 
               @click="sendRequest" 
@@ -111,8 +146,8 @@
           <div v-show="requestActiveTab === 'headers'" class="headers-container">
             <div v-for="(header, index) in requestForm.headers" :key="index" class="header-item">
               <div class="header-row">
-                <el-input 
-                  v-model="header.key" 
+                <el-input
+                  v-model="header.key"
                   placeholder="Key"
                   class="header-key"
                   @input="(val) => {
@@ -120,30 +155,38 @@
                       header.isCustomContentType = false
                     }
                   }"
-                />
-                <template v-if="header.key.toLowerCase() === 'content-type'">
-                  <el-select
+                >
+                  <template #input>
+                    <span>{{ highlightVariables(header.key) }}</span>
+                  </template>
+                </el-input>
+                <template v-if="header.key.toLowerCase() !== 'content-type'">
+                  <el-input
                     v-model="header.value"
-                    placeholder="选择或输入"
-                    filterable
-                    allow-create
-                    default-first-option
+                    placeholder="Value"
                     class="header-value"
                   >
-                    <el-option
-                      v-for="type in defaultContentTypes"
-                      :key="type.value"
-                      :label="type.label"
-                      :value="type.value"
-                    />
-                  </el-select>
+                    <template #input>
+                      <span>{{ highlightVariables(header.value) }}</span>
+                    </template>
+                  </el-input>
                 </template>
-                <el-input 
+                <el-select
                   v-else
-                  v-model="header.value" 
-                  placeholder="Value"
+                  v-model="header.value"
+                  placeholder="选择或输入"
+                  filterable
+                  allow-create
+                  default-first-option
                   class="header-value"
-                />
+                >
+                  <el-option
+                    v-for="type in defaultContentTypes"
+                    :key="type.value"
+                    :label="type.label"
+                    :value="type.value"
+                  />
+                </el-select>
                 <el-button
                   type="danger"
                   circle
@@ -182,16 +225,33 @@
                 <el-input
                   v-model="requestForm.params"
                   type="textarea"
-                  :rows="8"
+                  :rows="10"
                   placeholder="请输入JSON格式的请求参数"
                   class="param-textarea"
+                  :suggestions="getVariableSuggestions()"
                 />
               </template>
               <template v-else-if="requestForm.paramType === 'form'">
                 <div v-for="(param, index) in requestForm.formParams" :key="index" class="form-param-item">
                   <div class="form-param-row">
-                    <el-input v-model="param.key" placeholder="Key" class="param-key" />
-                    <el-input v-model="param.value" placeholder="Value" class="param-value" />
+                    <el-input
+                      v-model="param.key"
+                      placeholder="Key"
+                      class="param-key"
+                    >
+                      <template #input>
+                        <span>{{ highlightVariables(param.key) }}</span>
+                      </template>
+                    </el-input>
+                    <el-input
+                      v-model="param.value"
+                      placeholder="Value"
+                      class="param-value"
+                    >
+                      <template #input>
+                        <span>{{ highlightVariables(param.value) }}</span>
+                      </template>
+                    </el-input>
                     <el-button
                       type="danger"
                       circle
@@ -219,9 +279,10 @@
                 <el-input
                   v-model="requestForm.textParams"
                   type="textarea"
-                  :rows="8"
+                  :rows="10"
                   placeholder="请输入文本格式的请求参数"
                   class="param-textarea"
+                  :suggestions="getVariableSuggestions()"
                 />
               </template>
             </div>
@@ -296,17 +357,79 @@
         </div>
       </div>
     </el-container>
+
+    <!-- 设置对话框 -->
+    <el-dialog
+      v-model="settingsVisible"
+      title="环境变量设置"
+      width="800px"
+      destroy-on-close
+    >
+      <div class="environments-header">
+        <el-button type="primary" @click="createEnvironment">新建环境</el-button>
+      </div>
+      
+      <el-table :data="environments" style="width: 100%">
+        <el-table-column prop="name" label="环境名称" width="180" />
+        <el-table-column prop="description" label="描述" />
+        <el-table-column label="操作" width="200">
+          <template #default="scope">
+            <el-button-group>
+              <el-button size="small" @click="editEnvironment(scope.row)">编辑</el-button>
+              <el-button 
+                size="small" 
+                type="danger" 
+                @click="deleteEnvironment(scope.row)"
+              >删除</el-button>
+            </el-button-group>
+          </template>
+        </el-table-column>
+      </el-table>
+
+      <!-- 环境变量编辑对话框 -->
+      <el-dialog
+        v-model="envDialogVisible"
+        :title="envDialogType === 'create' ? '新建环境' : '编辑环境'"
+        width="600px"
+        append-to-body
+      >
+        <el-form :model="currentEnvironment" label-width="100px">
+          <el-form-item label="环境名称">
+            <el-input v-model="currentEnvironment.name" />
+          </el-form-item>
+          <el-form-item label="描述">
+            <el-input v-model="currentEnvironment.description" type="textarea" />
+          </el-form-item>
+          <el-form-item label="变量">
+            <div v-for="(variable, index) in currentEnvironment.variables" :key="index" class="variable-item">
+              <el-input v-model="variable.key" placeholder="变量名" style="width: 200px" :suggestions="getVariableSuggestions()" />
+              <el-input v-model="variable.value" placeholder="变量值" style="width: 300px" :suggestions="getVariableSuggestions()" />
+              <el-button type="danger" circle @click="removeVariable(index)">
+                <el-icon><Delete /></el-icon>
+              </el-button>
+            </div>
+            <el-button type="primary" @click="addVariable">添加变量</el-button>
+          </el-form-item>
+        </el-form>
+        <template #footer>
+          <span class="dialog-footer">
+            <el-button @click="envDialogVisible = false">取消</el-button>
+            <el-button type="primary" @click="saveEnvironment">确定</el-button>
+          </span>
+        </template>
+      </el-dialog>
+    </el-dialog>
   </el-container>
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, watch, computed, nextTick, onBeforeUnmount } from 'vue'
+import { ref, reactive, onMounted, watch, computed, nextTick, onBeforeUnmount, h } from 'vue'
 import axios from 'axios'
 import JsonEditor from 'json-editor-vue3'
 import * as XLSX from 'xlsx'
 import { utils, write } from 'xlsx'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Delete, Plus, Edit } from '@element-plus/icons-vue'
+import { Delete, Plus, Edit, Setting } from '@element-plus/icons-vue'
 
 // 自定义指令：自动聚焦
 const vFocus = {
@@ -406,6 +529,9 @@ onMounted(() => {
   window.utools.onPluginEnter(async (action) => {
     route.value = action.code
     enterAction.value = action
+    // 先加载环境列表
+    loadEnvironments()
+    // 再加载请求列表
     loadRequestList()
     if (requestList.value.length > 0) {
       currentRequestId.value = requestList.value[0].id
@@ -446,7 +572,8 @@ onMounted(() => {
               key: p.key || '',
               value: p.value || ''
             })) : [{ key: '', value: '' }],
-            textParams: requestForm.textParams || ''
+            textParams: requestForm.textParams || '',
+            environmentId: currentEnvId.value // 添加环境ID
           }
 
           const dbData = {
@@ -516,7 +643,7 @@ const sendRequest = () => {
   const headers = {}
   requestForm.headers.forEach(header => {
     if (header.key && header.value) {
-      headers[header.key] = header.value
+      headers[header.key] = replaceVariables(header.value)
     }
   })
 
@@ -524,7 +651,8 @@ const sendRequest = () => {
   let params = {}
   if (requestForm.paramType === 'json') {
     try {
-      params = requestForm.params ? JSON.parse(requestForm.params) : {}
+      const jsonStr = replaceVariables(requestForm.params)
+      params = jsonStr ? JSON.parse(jsonStr) : {}
     } catch (e) {
       ElMessage.error('JSON格式错误，请检查格式')
       loading.value = false
@@ -534,14 +662,17 @@ const sendRequest = () => {
     const formData = new FormData()
     requestForm.formParams.forEach(param => {
       if (param.key && param.value) {
-        formData.append(param.key, param.value)
+        formData.append(param.key, replaceVariables(param.value))
       }
     })
     params = formData
   } else {
-    params = requestForm.textParams || ''
+    params = replaceVariables(requestForm.textParams) || ''
   }
 
+  // 处理 URL
+  let url = replaceVariables(requestForm.url)
+  
   // 创建 XMLHttpRequest
   const xhr = new XMLHttpRequest()
   
@@ -549,7 +680,6 @@ const sendRequest = () => {
   xhr.timeout = 30000
 
   // 处理 GET 请求的参数
-  let url = requestForm.url
   if (requestForm.method === 'GET' && typeof params === 'object' && !(params instanceof FormData)) {
     const searchParams = new URLSearchParams()
     Object.entries(params).forEach(([key, value]) => {
@@ -960,6 +1090,15 @@ const loadRequest = (request) => {
   requestForm.formParams = data.formParams?.length ? data.formParams : [{ key: '', value: '' }]
   requestForm.textParams = data.textParams || ''
 
+  // 加载环境选择
+  if (data.environmentId) {
+    // 确保环境存在再设置
+    const envExists = environments.value.some(env => env.id === data.environmentId)
+    currentEnvId.value = envExists ? data.environmentId : ''
+  } else {
+    currentEnvId.value = ''
+  }
+
   // 恢复响应数据
   if (data.responseData) {
     responseData.value = data.responseData
@@ -1005,7 +1144,6 @@ const saveCurrentRequest = async () => {
   if (!currentRequest) return
 
   try {
-    // 创建一个可序列化的数据对象
     const data = {
       method: requestForm.method || 'GET',
       url: requestForm.url || '',
@@ -1024,7 +1162,8 @@ const saveCurrentRequest = async () => {
         key: p.key || '',
         value: p.value || ''
       })) : [{ key: '', value: '' }],
-      textParams: requestForm.textParams || ''
+      textParams: requestForm.textParams || '',
+      environmentId: currentEnvId.value // 添加环境ID
     }
 
     // 处理响应数据，确保它是可序列化的
@@ -1112,6 +1251,266 @@ const deleteRequest = (request) => {
     // 用户取消删除操作，不做任何处理
   })
 }
+
+// 设置相关
+const settingsVisible = ref(false)
+const envDialogVisible = ref(false)
+const envDialogType = ref('create')
+const environments = ref([])
+const currentEnvironment = ref({
+  name: '',
+  description: '',
+  variables: []
+})
+
+// 显示设置对话框
+const showSettings = () => {
+  settingsVisible.value = true
+  loadEnvironments()
+}
+
+// 加载环境变量
+const loadEnvironments = () => {
+  try {
+    const envs = window.utools.db.allDocs('environment_')
+    environments.value = envs.map(doc => ({
+      id: doc._id.replace('environment_', ''),
+      name: doc.name,
+      description: doc.description,
+      variables: doc.variables || []
+    }))
+  } catch (error) {
+    console.error('加载环境列表失败:', error)
+    environments.value = []
+  }
+}
+
+// 创建新环境
+const createEnvironment = () => {
+  envDialogType.value = 'create'
+  currentEnvironment.value = {
+    name: '',
+    description: '',
+    variables: [
+      { key: 'domain', value: '' },
+      { key: 'token', value: '' }
+    ]
+  }
+  envDialogVisible.value = true
+}
+
+// 编辑环境
+const editEnvironment = (env) => {
+  envDialogType.value = 'edit'
+  currentEnvironment.value = {
+    id: env.id,
+    name: env.name,
+    description: env.description,
+    variables: env.variables.length > 0 ? [...env.variables] : [
+      { key: 'domain', value: '' },
+      { key: 'token', value: '' }
+    ]
+  }
+  envDialogVisible.value = true
+}
+
+// 删除环境
+const deleteEnvironment = (env) => {
+  ElMessageBox.confirm('确定要删除这个环境吗？', '提示', {
+    confirmButtonText: '确定',
+    cancelButtonText: '取消',
+    type: 'warning'
+  }).then(() => {
+    window.utools.db.remove(`environment_${env.id}`)
+    loadEnvironments()
+    ElMessage.success('删除成功')
+  })
+}
+
+// 添加变量
+const addVariable = () => {
+  currentEnvironment.value.variables.push({
+    key: '',
+    value: ''
+  })
+}
+
+// 删除变量
+const removeVariable = (index) => {
+  currentEnvironment.value.variables.splice(index, 1)
+}
+
+// 保存环境
+const saveEnvironment = async () => {
+  if (!currentEnvironment.value.name) {
+    ElMessage.warning('请输入环境名称')
+    return
+  }
+
+  try {
+    // 确保变量数据可以被序列化
+    const variables = currentEnvironment.value.variables.map(v => ({
+      key: String(v.key || ''),
+      value: String(v.value || '')
+    }))
+
+    const envData = {
+      name: String(currentEnvironment.value.name),
+      description: String(currentEnvironment.value.description || ''),
+      variables: variables
+    }
+
+    if (envDialogType.value === 'create') {
+      const id = Date.now().toString()
+      const result = await window.utools.db.put({
+        _id: `environment_${id}`,
+        ...envData
+      })
+      if (!result.ok) {
+        throw new Error('创建环境失败')
+      }
+    } else {
+      const existingDoc = window.utools.db.get(`environment_${currentEnvironment.value.id}`)
+      const result = await window.utools.db.put({
+        _id: `environment_${currentEnvironment.value.id}`,
+        _rev: existingDoc._rev,
+        ...envData
+      })
+      if (!result.ok) {
+        throw new Error('更新环境失败')
+      }
+    }
+    
+    envDialogVisible.value = false
+    loadEnvironments() // 重新加载环境列表
+    ElMessage.success(envDialogType.value === 'create' ? '创建成功' : '更新成功')
+  } catch (error) {
+    console.error('保存环境失败:', error)
+    ElMessage.error(`保存环境失败: ${error.message}`)
+  }
+}
+
+// 获取当前环境的变量提示
+const getVariableSuggestions = () => {
+  const currentEnv = environments.value.find(env => env.id === currentEnvironment.value?.id)
+  if (!currentEnv) return []
+  return currentEnv.variables.map(v => ({
+    value: `{{${v.key}}}`,
+    label: `${v.key} (${v.value})`
+  }))
+}
+
+// 替换变量
+const replaceVariables = (text) => {
+  if (!text) return text
+  const currentEnv = environments.value.find(env => env.id === currentEnvironment.value?.id)
+  if (!currentEnv) return text
+  
+  let result = text
+  currentEnv.variables.forEach(variable => {
+    const regex = new RegExp(`{{${variable.key}}}`, 'g')
+    result = result.replace(regex, variable.value)
+  })
+  return result
+}
+
+// 解析 URL 中的变量
+const parseUrlWithVariables = (text) => {
+  if (!text) return []
+  const regex = /({{.*?}})|([^{]+)|({[^{].*?})/g
+  const parts = []
+  let match
+
+  while ((match = regex.exec(text)) !== null) {
+    if (match[1]) { // 变量
+      parts.push({ type: 'variable', text: match[1] })
+    } else if (match[2] || match[3]) { // 普通文本
+      parts.push({ type: 'text', text: match[2] || match[3] })
+    }
+  }
+
+  return parts
+}
+
+// 处理 URL 输入
+const handleUrlInput = () => {
+  // 实现处理 URL 输入的逻辑
+}
+
+// 添加变量高亮处理函数
+const highlightVariables = (text) => {
+  if (!text) return text
+  const regex = /{{.*?}}/g
+  const matches = text.match(regex)
+  if (!matches) return text
+
+  const parts = text.split(regex)
+  const result = []
+  
+  parts.forEach((part, index) => {
+    if (part) {
+      result.push(part)
+    }
+    if (matches[index]) {
+      result.push(h('span', {
+        style: {
+          color: '#409EFF',
+          backgroundColor: '#ecf5ff',
+          padding: '0 4px',
+          borderRadius: '4px',
+          margin: '0 2px'
+        }
+      }, matches[index]))
+    }
+  })
+  
+  return result
+}
+
+// 添加当前环境ID
+const currentEnvId = ref('')
+
+// 处理环境变更
+const handleEnvironmentChange = (envId) => {
+  if (!envId) {
+    currentEnvId.value = ''
+    return
+  }
+  
+  const selectedEnv = environments.value.find(env => env.id === envId)
+  if (!selectedEnv) {
+    currentEnvId.value = ''
+    return
+  }
+
+  // 查找 domain 变量
+  const domainVar = selectedEnv.variables.find(v => v.key === 'domain')
+  if (domainVar && domainVar.value) {
+    // 如果 URL 中已经有 domain 变量，替换它
+    if (requestForm.url.includes('{{domain}}')) {
+      requestForm.url = requestForm.url.replace('{{domain}}', domainVar.value)
+    } else {
+      // 否则，将 domain 值设置为新的 URL
+      requestForm.url = domainVar.value
+    }
+  }
+
+  // 查找 token 变量
+  const tokenVar = selectedEnv.variables.find(v => v.key === 'token')
+  if (tokenVar) {
+    // 查找或创建 Authorization header
+    let authHeader = requestForm.headers.find(h => h.key.toLowerCase() === 'authorization')
+    if (!authHeader) {
+      authHeader = { key: 'Authorization', value: '' }
+      requestForm.headers.push(authHeader)
+    }
+    // 设置 token 值
+    authHeader.value = tokenVar.value
+  }
+
+  // 保存当前请求
+  saveCurrentRequest()
+}
 </script>
 
 <style>
@@ -1172,31 +1571,40 @@ const deleteRequest = (request) => {
 
 .url-input-group {
   display: flex;
-  gap: 8px;
+  gap: 12px;
   align-items: center;
 }
 
-.method-select {
-  width: 110px !important;
+.env-select {
+  width: 140px !important;
   flex-shrink: 0;
 }
 
-.method-select :deep(.el-input__wrapper) {
+.env-select :deep(.el-input__wrapper) {
   border-radius: 4px;
   background-color: var(--el-fill-color-blank);
 }
 
-.method-select :deep(.el-input__inner) {
-  color: var(--el-color-primary);
+.env-select :deep(.el-input__inner) {
+  color: var(--el-color-success);
   font-weight: 500;
 }
 
-.url-input {
+.url-input-wrapper {
   flex: 1;
+  display: flex;
+}
+
+.method-select {
+  width: 110px !important;
+}
+
+.url-input {
+  width: 100%;
 }
 
 .url-input :deep(.el-input__wrapper) {
-  border-radius: 4px;
+  box-shadow: 0 0 0 1px var(--el-border-color) inset;
 }
 
 .send-button {
@@ -1518,5 +1926,120 @@ const deleteRequest = (request) => {
   background-color: var(--el-fill-color-blank);
   border: 1px solid var(--el-border-color);
   border-radius: 4px;
+}
+
+.settings-button {
+  margin-left: 8px;
+}
+
+.environments-header {
+  margin-bottom: 20px;
+}
+
+.variable-item {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  width: 100%;
+}
+
+.variable-item .el-input {
+  flex: 1;
+  min-width: 200px;
+  max-width: calc(50% - 24px); /* 减去间距和删除按钮的宽度 */
+}
+
+.variable-item .el-button {
+  flex-shrink: 0;
+}
+
+/* 环境变量对话框样式 */
+.el-dialog__body {
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.el-form-item__content {
+  flex-wrap: wrap;
+}
+
+.dialog-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* 变量高亮样式 */
+.variable-highlight {
+  color: #409EFF;
+  background-color: #ecf5ff;
+  padding: 0 4px;
+  border-radius: 4px;
+  margin: 0 2px;
+}
+
+.url-input-wrapper {
+  flex: 1;
+  display: flex;
+}
+
+.url-input {
+  width: 100%;
+}
+
+.url-input :deep(.el-input__wrapper) {
+  box-shadow: 0 0 0 1px var(--el-border-color) inset;
+}
+
+.url-input :deep(.el-input__wrapper:hover) {
+  box-shadow: 0 0 0 1px var(--el-border-color-hover) inset;
+}
+
+.url-input :deep(.el-input__wrapper.is-focus) {
+  box-shadow: 0 0 0 1px var(--el-color-primary) inset;
+}
+
+.url-input-content {
+  display: inline-block;
+  width: 100%;
+  min-height: 32px;
+  line-height: 32px;
+  font-family: monospace;
+}
+
+.method-select {
+  width: 110px !important;
+}
+
+/* 环境选择下拉框样式 */
+.env-select {
+  width: 140px !important;
+  flex-shrink: 0;
+}
+
+.env-select :deep(.el-input__wrapper) {
+  border-radius: 4px;
+  background-color: var(--el-fill-color-blank);
+}
+
+.env-select :deep(.el-input__inner) {
+  color: var(--el-color-success);
+  font-weight: 500;
+}
+
+/* 调整 URL 输入框样式 */
+.url-input :deep(.el-input__prepend) {
+  padding: 0;
+  background-color: transparent;
+}
+
+.url-input :deep(.el-select) {
+  margin: 0;
+}
+
+.url-input :deep(.el-input__wrapper) {
+  box-shadow: 0 0 0 1px var(--el-border-color) inset;
 }
 </style>
