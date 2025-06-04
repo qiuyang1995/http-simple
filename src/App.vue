@@ -36,41 +36,76 @@
         class="request-menu"
         @select="handleRequestSelect"
       >
-        <el-menu-item
-          v-for="request in requestList"
-          :key="request.id"
-          :index="request.id"
-          class="request-menu-item"
+        <draggable
+          v-model="requestList"
+          item-key="id"
+          animation="100"
+          handle=".request-item-content"
+          ghost-class="drag-ghost"
+          chosen-class="drag-chosen"
+          drag-class="drag-dragging"
+          @end="saveRequestOrder"
         >
-          <div class="request-item-content">
-            <el-checkbox 
-              v-model="request.selected" 
-              @click.stop 
-              @change="handleRequestSelect"
-            />
-            <el-input
-              v-if="request.isEditing"
-              v-model="request.name"
-              size="small"
-              @blur="saveRequestName(request)"
-              @keyup.enter="saveRequestName(request)"
-              v-focus
-            />
-            <span v-else class="request-name">
-              <span @dblclick="startEditingName(request)" class="request-text">{{ request.name }}</span>
-              <el-icon class="edit-icon" @click="startEditingName(request)"><Edit /></el-icon>
-            </span>
-            <el-button
-              type="danger"
-              size="small"
-              circle
-              @click.stop="deleteRequest(request)"
-              class="delete-btn"
+          <template #item="{ element: request }">
+            <el-menu-item
+              :index="request.id"
+              :key="request.id"
+              class="request-menu-item"
             >
-              <el-icon><Delete /></el-icon>
-            </el-button>
-          </div>
-        </el-menu-item>
+              <div class="request-item-content">
+                <el-checkbox 
+                  v-model="request.selected" 
+                  @click.stop 
+                  @change="handleRequestSelect"
+                />
+                <el-input
+                  v-if="request.isEditing"
+                  v-model="request.name"
+                  size="small"
+                  @blur="saveRequestName(request)"
+                  @keyup.enter="saveRequestName(request)"
+                  v-focus
+                />
+                <span v-else class="request-name">
+                  <span @dblclick="startEditingName(request)" class="request-text">{{ request.name }}</span>
+                  <el-icon class="edit-icon" @click="startEditingName(request)"><Edit /></el-icon>
+                </span>
+                <el-button
+                  type="default"
+                  size="mini"
+                  circle
+                  @click.stop="copyRequest(request)"
+                  class="copy-btn"
+                  title="复制请求"
+                >
+                  <el-icon class="copy-icon">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#606266" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                      <rect x="2" y="2" width="13" height="13" rx="2" ry="2"/>
+                    </svg>
+                  </el-icon>
+                </el-button>
+                <el-button
+                  type="default"
+                  size="mini"
+                  circle
+                  @click.stop="deleteRequest(request)"
+                  class="delete-btn"
+                  title="删除请求"
+                >
+                  <el-icon class="delete-icon">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#f56c6c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <polyline points="3 6 5 6 21 6" />
+                      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m5 0V4a2 2 0 0 1 2-2h0a2 2 0 0 1 2 2v2" />
+                      <line x1="10" y1="11" x2="10" y2="17" />
+                      <line x1="14" y1="11" x2="14" y2="17" />
+                    </svg>
+                  </el-icon>
+                </el-button>
+              </div>
+            </el-menu-item>
+          </template>
+        </draggable>
       </el-menu>
     </el-aside>
 
@@ -99,6 +134,8 @@
                 :autocomplete="'off'"
                 @change="saveCurrentRequest"
                 @input="handleUrlInput"
+                @blur="syncUrlToParams"
+                @keyup.enter="syncUrlToParams"
               >
                 <template #prepend>
                   <el-select
@@ -188,6 +225,7 @@
                   />
                 </el-select>
                 <el-button
+                  v-if="requestForm.headers.length > 1"
                   type="danger"
                   circle
                   size="small"
@@ -214,6 +252,7 @@
           <div v-show="requestActiveTab === 'body'" class="body-container">
             <div class="param-type-selector">
               <el-radio-group v-model="requestForm.paramType" @change="saveCurrentRequest">
+                <el-radio :value="'params'">Params</el-radio>
                 <el-radio :value="'json'">JSON</el-radio>
                 <el-radio :value="'form'">Form Data</el-radio>
                 <el-radio :value="'text'">Text</el-radio>
@@ -221,7 +260,44 @@
             </div>
 
             <div class="params-container">
-              <template v-if="requestForm.paramType === 'json'">
+              <template v-if="requestForm.paramType === 'params'">
+                <div v-for="(param, index) in requestForm.queryParams" :key="index" class="form-param-item">
+                  <div class="form-param-row">
+                    <el-input
+                      v-model="param.key"
+                      placeholder="Key"
+                      class="param-key"
+                    />
+                    <el-input
+                      v-model="param.value"
+                      placeholder="Value"
+                      class="param-value"
+                    />
+                    <el-button
+                      v-if="requestForm.queryParams.length > 1"
+                      type="danger"
+                      circle
+                      size="small"
+                      @click="requestForm.queryParams.splice(index, 1)"
+                      class="icon-button"
+                    >
+                      <el-icon><Delete /></el-icon>
+                    </el-button>
+                  </div>
+                </div>
+                <div class="add-param-row">
+                  <el-button
+                    type="primary"
+                    circle
+                    size="small"
+                    @click="requestForm.queryParams.push({ key: '', value: '' })"
+                    class="icon-button"
+                  >
+                    <el-icon><Plus /></el-icon>
+                  </el-button>
+                </div>
+              </template>
+              <template v-else-if="requestForm.paramType === 'json'">
                 <el-input
                   v-model="requestForm.params"
                   type="textarea"
@@ -243,16 +319,42 @@
                         <span>{{ highlightVariables(param.key) }}</span>
                       </template>
                     </el-input>
-                    <el-input
-                      v-model="param.value"
-                      placeholder="Value"
-                      class="param-value"
-                    >
-                      <template #input>
-                        <span>{{ highlightVariables(param.value) }}</span>
-                      </template>
-                    </el-input>
+                    <el-select v-model="param.type" class="param-type-select" style="width: 120px; margin: 0 8px;" :default-value="'Text'">
+                      <el-option label="Text" value="Text" />
+                      <el-option label="file" value="file" />
+                    </el-select>
+                    <template v-if="param.type === 'file'">
+                      <div class="param-value">
+                        <el-upload
+                        class="param-file-upload"
+                        :show-file-list="false"
+                        :multiple="true"
+                        :auto-upload="false"
+                        :on-change="(file, fileList) => handleFormFileChange(file, fileList, index)"
+                      >
+                        <el-button size="small" type="primary">选择文件</el-button>
+                      </el-upload>
+                      <div v-if="param.files && param.files.length" class="file-list">
+                        <div v-for="(file, fidx) in param.files" :key="file.uid || file.name" class="file-list-item">
+                          <span class="file-name">{{ file.name }}</span>
+                          <el-icon class="file-remove" @click="removeFormFile(index, fidx)"><Delete /></el-icon>
+                        </div>
+                      </div>
+                      </div>
+                    </template>
+                    <template v-else>
+                      <el-input
+                        v-model="param.value"
+                        placeholder="Value"
+                        class="param-value"
+                      >
+                        <template #input>
+                          <span>{{ highlightVariables(param.value) }}</span>
+                        </template>
+                      </el-input>
+                    </template>
                     <el-button
+                      v-if="requestForm.formParams.length > 1"
                       type="danger"
                       circle
                       size="small"
@@ -430,6 +532,7 @@ import * as XLSX from 'xlsx'
 import { utils, write } from 'xlsx'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Delete, Plus, Edit, Setting } from '@element-plus/icons-vue'
+import draggable from 'vuedraggable'
 
 // 自定义指令：自动聚焦
 const vFocus = {
@@ -460,8 +563,9 @@ const requestForm = reactive({
     { key: '', value: '' }
   ],
   paramType: 'json',
+  queryParams: [{ key: '', value: '' }],
   params: '',
-  formParams: [{ key: '', value: '' }],
+  formParams: [{ key: '', type: 'Text', value: '' }],
   textParams: ''
 })
 
@@ -525,7 +629,53 @@ watch(() => responseData.value, (newValue) => {
   }
 }, { deep: true })
 
+const originalUrl = ref('')
+
+let isSyncingUrlParams = false;
+
+// 移除原有的 watch(() => requestForm.url, ...)，只保留记录 base 的功能
+watch(() => requestForm.url, (newUrl) => {
+  if (isSyncingUrlParams) return;
+  if (typeof newUrl !== 'string') return;
+  // 只记录 base，不做任何修改
+  originalUrl.value = newUrl.split('?')[0];
+});
+
+// 只保留 params→url 的 watch
+watch(() => requestForm.queryParams.map(p => p.key + '=' + p.value), () => {
+  updateUrlWithParams();
+});
+
+function updateUrlWithParams() {
+  // 只拼接参数部分，不覆盖 base，允许 url 自由输入
+  let base = (requestForm.url || '').split('?')[0];
+  const queryArr = (requestForm.queryParams || []).filter(p => p.key).map(p => `${encodeURIComponent(p.key)}=${encodeURIComponent(p.value)}`);
+  if (queryArr.length) {
+    requestForm.url = base + '?' + queryArr.join('&');
+  } else {
+    requestForm.url = base;
+  }
+}
+
+// url→params 的同步只在失焦/回车时触发
+function syncUrlToParams() {
+  const url = requestForm.url || '';
+  const [base, query] = url.split('?');
+  originalUrl.value = base;
+  if (query !== undefined) {
+    const arr = query.split('&').map(pair => {
+      const [k, v] = pair.split('=');
+      return { key: decodeURIComponent(k || ''), value: decodeURIComponent(v || '') };
+    }).filter(p => p.key);
+    requestForm.queryParams = arr.length ? arr : [{ key: '', value: '' }];
+  } else {
+    requestForm.queryParams = [{ key: '', value: '' }];
+  }
+}
+
+// 初始化 originalUrl
 onMounted(() => {
+  originalUrl.value = (requestForm.url || '').split('?')[0]
   window.utools.onPluginEnter(async (action) => {
     route.value = action.code
     enterAction.value = action
@@ -566,12 +716,16 @@ onMounted(() => {
               { key: 'Authorization', value: '' },
               { key: '', value: '' }
             ],
-            paramType: requestForm.paramType || 'json',
+            paramType: requestForm.paramType || 'params',
             params: requestForm.params || '',
-            formParams: requestForm.formParams?.length ? requestForm.formParams.map(p => ({
-              key: p.key || '',
-              value: p.value || ''
-            })) : [{ key: '', value: '' }],
+            formParams: requestForm.formParams?.length
+              ? requestForm.formParams.map(p => ({
+                  key: p.key || '',
+                  value: p.value || '',
+                  type: p.type || 'Text'
+                  // 不保存 files 字段
+                }))
+              : [{ key: '', value: '', type: 'Text' }],
             textParams: requestForm.textParams || '',
             environmentId: currentEnvId.value // 添加环境ID
           }
@@ -597,7 +751,7 @@ onMounted(() => {
     route.value = ''
   })
 
-  nextTick(() => {
+    nextTick(() => {
     // initEditor()
   })
 })
@@ -621,7 +775,7 @@ const removeHeader = (index) => {
 }
 
 const addFormParam = () => {
-  requestForm.formParams.push({ key: '', value: '' })
+  requestForm.formParams.push({ key: '', value: '', type: 'text', files: [] })
 }
 
 const removeFormParam = (index) => {
@@ -642,6 +796,14 @@ const sendRequest = () => {
   // 处理请求头
   const headers = {}
   requestForm.headers.forEach(header => {
+    // 如果是 form-data，不要手动加 Content-Type，让浏览器自动生成带 boundary 的
+    if (
+      requestForm.paramType === 'form' &&
+      header.key &&
+      header.key.toLowerCase() === 'content-type'
+    ) {
+      return // 跳过 Content-Type
+    }
     if (header.key && header.value) {
       headers[header.key] = replaceVariables(header.value)
     }
@@ -661,8 +823,15 @@ const sendRequest = () => {
   } else if (requestForm.paramType === 'form') {
     const formData = new FormData()
     requestForm.formParams.forEach(param => {
-      if (param.key && param.value) {
-        formData.append(param.key, replaceVariables(param.value))
+      if (param.key) {
+        if (param.type === 'file' && param.files && param.files.length) {
+          param.files.forEach(file => {
+            formData.append(param.key, file)
+          })
+        } else if (param.type === 'Text') {
+          // 允许 value 为空字符串、false、0
+          formData.append(param.key, replaceVariables(param.value ?? ''))
+        }
       }
     })
     params = formData
@@ -677,7 +846,7 @@ const sendRequest = () => {
   const xhr = new XMLHttpRequest()
   
   // 设置超时
-  xhr.timeout = 30000
+  xhr.timeout = 3000000
 
   // 处理 GET 请求的参数
   if (requestForm.method === 'GET' && typeof params === 'object' && !(params instanceof FormData)) {
@@ -1015,7 +1184,7 @@ const loadRequestList = () => {
 
 // 创建新请求
 const createNewRequest = async () => {
-  const id = Date.now().toString()
+  const id = Date.now().toString();
   const newRequest = {
     id,
     name: '新建请求',
@@ -1027,14 +1196,15 @@ const createNewRequest = async () => {
         { key: 'Authorization', value: '' },
         { key: '', value: '' }
       ],
-      paramType: 'json',
+      paramType: 'params', // 默认选中 Params
+      queryParams: [{ key: '', value: '' }],
       params: '',
       formParams: [{ key: '', value: '' }],
       textParams: ''
     },
     isEditing: false,
     selected: false
-  }
+  };
   
   // 确保存储的数据是纯粹的对象
   const dbData = {
@@ -1085,7 +1255,8 @@ const loadRequest = (request) => {
     { key: 'Authorization', value: '' },
     { key: '', value: '' }
   ]
-  requestForm.paramType = data.paramType || 'json'
+  requestForm.paramType = data.paramType || 'params'
+  requestForm.queryParams = data.queryParams?.length ? data.queryParams : [{ key: '', value: '' }]
   requestForm.params = data.params || ''
   requestForm.formParams = data.formParams?.length ? data.formParams : [{ key: '', value: '' }]
   requestForm.textParams = data.textParams || ''
@@ -1112,6 +1283,8 @@ const loadRequest = (request) => {
     requestStats.totalCount = 0
     requestStats.requestTime = 0
   }
+
+  originalUrl.value = (requestForm.url || '').split('?')[0]
 }
 
 // 选择请求
@@ -1133,6 +1306,7 @@ const handleRequestSelect = async (id) => {
   const request = requestList.value.find(r => r.id === id)
   if (request) {
     loadRequest(request)
+    originalUrl.value = (requestForm.url || '').split('?')[0]
   }
 }
 
@@ -1156,12 +1330,22 @@ const saveCurrentRequest = async () => {
         { key: 'Authorization', value: '' },
         { key: '', value: '' }
       ],
-      paramType: requestForm.paramType || 'json',
+      paramType: requestForm.paramType || 'params',
+      queryParams: requestForm.queryParams?.length
+        ? requestForm.queryParams.map(p => ({
+            key: p.key || '',
+            value: p.value || ''
+          }))
+        : [{ key: '', value: '' }],
       params: requestForm.params || '',
-      formParams: requestForm.formParams?.length ? requestForm.formParams.map(p => ({
-        key: p.key || '',
-        value: p.value || ''
-      })) : [{ key: '', value: '' }],
+      formParams: requestForm.formParams?.length
+        ? requestForm.formParams.map(p => ({
+            key: p.key || '',
+            value: p.value || '',
+            type: p.type || 'Text'
+            // 不保存 files 字段
+          }))
+        : [{ key: '', value: '', type: 'Text' }],
       textParams: requestForm.textParams || '',
       environmentId: currentEnvId.value // 添加环境ID
     }
@@ -1250,6 +1434,41 @@ const deleteRequest = (request) => {
   }).catch(() => {
     // 用户取消删除操作，不做任何处理
   })
+}
+
+// 复制请求
+const copyRequest = async (request) => {
+  const newId = Date.now().toString()
+  // 深拷贝请求数据
+  const newData = JSON.parse(JSON.stringify(request.data))
+  // 新请求名
+  const newName = request.name + ' - 复制'
+  const newRequest = {
+    id: newId,
+    name: newName,
+    data: newData,
+    isEditing: false,
+    selected: false
+  }
+  // 保存到数据库
+  const dbData = {
+    _id: `request_${newId}`,
+    name: newName,
+    data: newData
+  }
+  try {
+    const result = await window.utools.db.put(dbData)
+    if (result.ok) {
+      newRequest._rev = result.rev
+      requestList.value.push(newRequest)
+      ElMessage.success('请求已复制')
+    } else {
+      throw new Error('复制请求失败')
+    }
+  } catch (error) {
+    console.error('复制请求失败:', error)
+    ElMessage.error(`复制请求失败: ${error.message}`)
+  }
 }
 
 // 设置相关
@@ -1464,6 +1683,7 @@ const highlightVariables = (text) => {
     }
   })
   
+  
   return result
 }
 
@@ -1511,6 +1731,51 @@ const handleEnvironmentChange = (envId) => {
   // 保存当前请求
   saveCurrentRequest()
 }
+
+// 拖拽结束后保存顺序（如需持久化顺序可在此实现）
+const saveRequestOrder = async () => {
+  try {
+    // 只保存顺序，不做其他副作用
+    // 可选：将顺序保存到本地数据库
+    // 例如：window.utools.db.put({_id: 'request_order', order: requestList.value.map(r => r.id)})
+    // 这里只做内存顺序更新，避免频繁写入
+  } catch (error) {
+    console.error('保存请求顺序失败:', error)
+  }
+}
+
+// 处理文件选择，支持多文件
+const handleFormFileChange = (file, fileList, index) => {
+  requestForm.formParams[index].files = fileList.map(f => f.raw)
+  // value 字段用于显示文件名（可选）
+  requestForm.formParams[index].value = fileList.map(f => f.name).join(', ')
+}
+
+// 移除单个文件
+const removeFormFile = (paramIdx, fileIdx) => {
+  const files = requestForm.formParams[paramIdx].files
+  files.splice(fileIdx, 1)
+  requestForm.formParams[paramIdx].files = [...files]
+  requestForm.formParams[paramIdx].value = files.map(f => f.name).join(', ')
+}
+
+// 监听 paramType 变化，自动设置 Content-Type
+watch(() => requestForm.paramType, (newType) => {
+  if (newType === 'form') {
+    // 查找 Content-Type header
+    let ctHeader = requestForm.headers.find(h => h.key.toLowerCase() === 'content-type')
+    if (!ctHeader) {
+      ctHeader = { key: 'Content-Type', value: 'multipart/form-data' }
+      requestForm.headers.push(ctHeader)
+    } else {
+      ctHeader.value = 'multipart/form-data'
+    }
+  } else if (newType === 'json') {
+    // 可选：切回 json 时自动恢复
+    let ctHeader = requestForm.headers.find(h => h.key.toLowerCase() === 'content-type')
+    if (ctHeader) ctHeader.value = 'application/json'
+  }
+})
 </script>
 
 <style>
@@ -1822,13 +2087,28 @@ const handleEnvironmentChange = (envId) => {
 }
 
 .delete-btn {
-  opacity: 0;
-  transition: opacity 0.2s;
-  margin-left: auto;
+  width: 22px;
+  height: 22px;
+  min-width: 22px;
+  min-height: 22px;
+  padding: 0;
+  background: #f5f7fa;
+  border: none;
+  box-shadow: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s;
 }
-
-.request-item-content:hover .delete-btn {
-  opacity: 1;
+.delete-btn:hover {
+  background: #faeaea;
+}
+.delete-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
 }
 
 .request-menu-item {
@@ -1908,16 +2188,47 @@ const handleEnvironmentChange = (envId) => {
   display: flex;
   gap: 8px;
   margin-bottom: 8px;
-  align-items: center;
+  align-items: flex-start;
 }
 
+.param-file-upload {
+  display: inline-block;
+  margin-right: 0;
+}
+.file-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 4px;
+}
+.file-list-item {
+  background: #f5f7fa;
+  border-radius: 4px;
+  padding: 2px 8px;
+  display: flex;
+  align-items: center;
+  font-size: 12px;
+  width: 100%;
+  box-sizing: border-box;
+}
+.file-name {
+  margin-right: 4px;
+  color: #606266;
+}
+.file-remove {
+  color: #f56c6c;
+  cursor: pointer;
+  font-size: 14px;
+}
+.file-remove:hover {
+  color: #d9001b;
+}
 .add-param-row {
   margin-top: 8px;
   padding-left: calc(66.67% + 16px);
   display: flex;
   justify-content: flex-end;
 }
-
 .empty-table {
   height: 100%;
   display: flex;
@@ -1927,15 +2238,12 @@ const handleEnvironmentChange = (envId) => {
   border: 1px solid var(--el-border-color);
   border-radius: 4px;
 }
-
 .settings-button {
   margin-left: 8px;
 }
-
 .environments-header {
   margin-bottom: 20px;
 }
-
 .variable-item {
   display: flex;
   gap: 8px;
@@ -1944,33 +2252,27 @@ const handleEnvironmentChange = (envId) => {
   flex-wrap: wrap;
   width: 100%;
 }
-
 .variable-item .el-input {
   flex: 1;
   min-width: 200px;
   max-width: calc(50% - 24px); /* 减去间距和删除按钮的宽度 */
 }
-
 .variable-item .el-button {
   flex-shrink: 0;
 }
-
 /* 环境变量对话框样式 */
 .el-dialog__body {
   max-height: 60vh;
   overflow-y: auto;
 }
-
 .el-form-item__content {
   flex-wrap: wrap;
 }
-
 .dialog-footer {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
 }
-
 /* 变量高亮样式 */
 .variable-highlight {
   color: #409EFF;
@@ -1979,28 +2281,22 @@ const handleEnvironmentChange = (envId) => {
   border-radius: 4px;
   margin: 0 2px;
 }
-
 .url-input-wrapper {
   flex: 1;
   display: flex;
 }
-
 .url-input {
   width: 100%;
 }
-
 .url-input :deep(.el-input__wrapper) {
   box-shadow: 0 0 0 1px var(--el-border-color) inset;
 }
-
 .url-input :deep(.el-input__wrapper:hover) {
   box-shadow: 0 0 0 1px var(--el-border-color-hover) inset;
 }
-
 .url-input :deep(.el-input__wrapper.is-focus) {
   box-shadow: 0 0 0 1px var(--el-color-primary) inset;
 }
-
 .url-input-content {
   display: inline-block;
   width: 100%;
@@ -2008,38 +2304,110 @@ const handleEnvironmentChange = (envId) => {
   line-height: 32px;
   font-family: monospace;
 }
-
 .method-select {
   width: 110px !important;
 }
-
 /* 环境选择下拉框样式 */
 .env-select {
   width: 140px !important;
   flex-shrink: 0;
 }
-
 .env-select :deep(.el-input__wrapper) {
   border-radius: 4px;
   background-color: var(--el-fill-color-blank);
 }
-
 .env-select :deep(.el-input__inner) {
   color: var(--el-color-success);
   font-weight: 500;
 }
-
 /* 调整 URL 输入框样式 */
 .url-input :deep(.el-input__prepend) {
   padding: 0;
   background-color: transparent;
 }
-
 .url-input :deep(.el-select) {
   margin: 0;
 }
-
 .url-input :deep(.el-input__wrapper) {
   box-shadow: 0 0 0 1px var(--el-border-color) inset;
+}
+.copy-btn {
+  width: 22px;
+  height: 22px;
+  min-width: 22px;
+  min-height: 22px;
+  padding: 0;
+  background: #f5f7fa;
+  border: none;
+  box-shadow: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s;
+}
+.copy-btn:hover {
+  background: #e6f0fa;
+}
+.copy-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+}
+.drag-ghost {
+  opacity: 0.5;
+  background: #e6f7ff !important;
+}
+.drag-chosen {
+  background: #f0f9eb !important;
+}
+.drag-dragging {
+  background: #f5f7fa !important;
+}
+.request-item-content .copy-btn,
+.request-item-content .delete-btn {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s;
+}
+.request-item-content:hover .copy-btn,
+.request-item-content:hover .delete-btn {
+  opacity: 1;
+  pointer-events: auto;
+}
+.param-type-select {
+  min-width: 60px;
+  max-width: 80px;
+}
+.param-file-upload {
+  display: inline-block;
+  margin-right: 8px;
+}
+.file-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+.file-list-item {
+  background: #f5f7fa;
+  border-radius: 4px;
+  padding: 2px 8px;
+  display: flex;
+  align-items: center;
+  font-size: 12px;
+}
+.file-name {
+  margin-right: 4px;
+  color: #606266;
+}
+.file-remove {
+  color: #f56c6c;
+  cursor: pointer;
+  font-size: 14px;
+}
+.file-remove:hover {
+  color: #d9001b;
 }
 </style>
